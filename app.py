@@ -32,7 +32,7 @@ with st.sidebar:
     st.title("🚀 NanoSignals PRO")
     menu = st.radio("MENU", ["Dashboard Executivo", "Lançamentos e Edição", "Importar Dados"])
 
-# --- LÓGICA DE IMPORTAÇÃO (MAIS ROBUSTA) ---
+# --- LÓGICA DE IMPORTAÇÃO (ELÁSTICA) ---
 if menu == "Importar Dados":
     st.title("📥 Importação de Histórico")
     uploaded_files = st.file_uploader("Suba seus arquivos CSV aqui", accept_multiple_files=True)
@@ -40,19 +40,21 @@ if menu == "Importar Dados":
         conn = get_db_connection()
         for file in uploaded_files:
             try:
-                # O parâmetro 'on_bad_lines="skip"' ignora linhas que estão fora do padrão
-                # O parâmetro 'sep' tenta detectar automaticamente ou assume vírgula
+                # Lê o arquivo tentando detectar o formato
                 df = pd.read_csv(file, encoding='latin-1', on_bad_lines='skip', sep=None, engine='python')
                 
-                # Seleciona apenas as 5 colunas que importam, independentemente do nome original
-                df = df.iloc[:, :5]
-                df.columns = ['data', 'valor', 'descricao', 'responsavel', 'tipo']
+                # CRIAÇÃO DO DATAFRAME PADRÃO (Elástico)
+                # Criamos um DF vazio com as colunas corretas e preenchemos
+                df_final = pd.DataFrame(columns=['data', 'valor', 'descricao', 'responsavel', 'tipo'])
                 
-                # Remove linhas onde todos os campos são nulos
-                df = df.dropna(how='all')
+                # Copia o que for possível das colunas originais para as colunas padrão
+                for i in range(min(len(df.columns), 5)):
+                    df_final.iloc[:, i] = df.iloc[:, i]
                 
-                # Garante que dados vazios não quebrem o banco
-                df.to_sql('financeiro', conn, if_exists='append', index=False)
+                # Preenche valores faltantes
+                df_final = df_final.fillna("Não informado")
+                
+                df_final.to_sql('financeiro', conn, if_exists='append', index=False)
                 st.success(f"Arquivo {file.name} processado com sucesso!")
             except Exception as e:
                 st.error(f"Erro no arquivo {file.name}: {e}")
@@ -66,6 +68,9 @@ elif menu == "Dashboard Executivo":
     conn.close()
     
     if not df.empty:
+        # Corrige tipo de dados para cálculo
+        df['valor'] = pd.to_numeric(df['valor'], errors='coerce').fillna(0)
+        
         c1, c2, c3 = st.columns(3)
         c1.metric("Receita Total", f"R$ {df[df['tipo']=='Entrada']['valor'].sum():,.2f}")
         c2.metric("Despesa Total", f"R$ {df[df['tipo']=='Saída']['valor'].sum():,.2f}")
@@ -92,7 +97,7 @@ elif menu == "Lançamentos e Edição":
         st.subheader("Novo Lançamento Manual")
         c1, c2, c3 = st.columns(3)
         data = c1.date_input("Data")
-        valor = c2.number_input("Valor", min_value=0.0, format="%.2f")
+        valor = c2.number_input("Valor (R$)", min_value=0.0, format="%.2f")
         desc = c3.text_input("Descrição")
         resp = c1.text_input("Responsável")
         tipo = c2.selectbox("Natureza", ["Entrada", "Saída"])
