@@ -1,64 +1,75 @@
 import streamlit as st
 import pandas as pd
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+import sqlite3
+import os
 import plotly.express as px
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
-st.set_page_config(page_title="Gestão Financeira NanoSignals", layout="wide")
-st.title("🚀 Sistema de Gestão Financeira - NanoSignals")
+# Configuração da página
+st.set_page_config(page_title="NanoSignals PRO", layout="wide")
+st.title("🚀 NanoSignals - Gestão Autônoma e Integrada")
 
-def conectar_gsheets():
-    # Carrega as chaves do Secrets
-    creds_dict = {
-        "type": st.secrets["type"],
-        "project_id": st.secrets["project_id"],
-        "private_key_id": st.secrets["private_key_id"],
-        "private_key": st.secrets["private_key"],
-        "client_email": st.secrets["client_email"],
-        "client_id": st.secrets["client_id"],
-        "auth_uri": st.secrets["auth_uri"],
-        "token_uri": st.secrets["token_uri"],
-        "auth_provider_x509_cert_url": st.secrets["auth_provider_x509_cert_url"],
-        "client_x509_cert_url": st.secrets["client_x509_cert_url"]
-    }
-    # Escopo para Drive e Planilhas
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive", "https://www.googleapis.com/auth/spreadsheets"]
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-    return gspread.authorize(creds)
+# Conexão com o banco de dados interno
+conn = sqlite3.connect('nanosignals_db.db', check_same_thread=False)
+c = conn.cursor()
 
-# Conexão com tratamento de erro detalhado
-try:
-    client = conectar_gsheets()
-    # Usando o ID fixo da planilha
-    sheet = client.open_by_key("1B_6Gd5l0lv3MeXt4WYBfZ9wa9AGxrf5SIJW54697G6M").sheet1
-    df = pd.DataFrame(sheet.get_all_records())
-    df['Valor'] = pd.to_numeric(df['Valor'], errors='coerce').fillna(0)
-except Exception as e:
-    st.error(f"Erro detalhado de conexão: {e}")
-    st.info("Verifique se o e-mail do robô nanosignals-bot@precise-ascent-347615.iam.gserviceaccount.com tem acesso de Editor à planilha.")
-    st.stop()
+# Criação da tabela padrão (Data, Valor, Descricao, Responsavel, Tipo)
+c.execute('''CREATE TABLE IF NOT EXISTS financeiro 
+             (data TEXT, valor REAL, descricao TEXT, responsavel TEXT, tipo TEXT)''')
+conn.commit()
 
-# Abas
-aba1, aba2, aba3 = st.tabs(["Dashboard", "Relatório", "Novo Lançamento"])
+# --- MÓDULO DE MIGRACÃO AUTOMÁTICA ---
+def importar_csv_para_banco():
+    arquivos = [f for f in os.listdir('.') if f.endswith('.csv')]
+    for arquivo in arquivos:
+        try:
+            df = pd.read_csv(arquivo)
+            # Renomeia colunas para garantir consistência
+            df.columns = ['data', 'valor', 'descricao', 'responsavel', 'tipo']
+            df.to_sql('financeiro', conn, if_exists='append', index=False)
+        except Exception as e:
+            st.warning(f"Erro ao importar {arquivo}: {e}")
+    conn.commit()
+
+# Verifica se o banco está vazio para importar as planilhas
+c.execute("SELECT count(*) FROM financeiro")
+if c.fetchone()[0] == 0:
+    importar_csv_para_banco()
+    st.info("Sistema inicializado: Histórico das planilhas importado.")
+
+# --- INTERFACE ---
+aba1, aba2, aba3 = st.tabs(["Dashboard", "Gestão de Dados", "Novo Lançamento"])
+
+# Carrega dataframe do banco
+df_banco = pd.read_sql_query("SELECT * FROM financeiro", conn)
 
 with aba1:
+    st.subheader("Visão Geral Financeira")
     col1, col2 = st.columns(2)
-    col1.plotly_chart(px.bar(df, x='Responsavel', y='Valor', color='Tipo'), use_container_width=True)
-    col2.plotly_chart(px.pie(df, values='Valor', names='Responsavel'), use_container_width=True)
+    if not df_banco.empty:
+        col1.plotly_chart(px.bar(df_banco, x='responsavel', y='valor', color='tipo', title="Gastos por Sócio"), use_container_width=True)
+        col2.plotly_chart(px.pie(df_banco, values='valor', names='responsavel', title="Distribuição"), use_container_width=True)
 
 with aba2:
-    gb = GridOptionsBuilder.from_dataframe(df)
-    gb.configure_default_column(editable=True)
-    AgGrid(df, gridOptions=gb.build(), update_mode=GridUpdateMode.VALUE_CHANGED, use_container_width=True)
+    st.subheader("Relatórios Detalhados")
+    gb = GridOptionsBuilder.from_dataframe(df_banco)
+    gb.configure_default_column(editable=True, filter=True)
+    AgGrid(df_banco, gridOptions=gb.build(), update_mode=GridUpdateMode.VALUE_CHANGED, use_container_width=True)
+    
+    if st.button("Download CSV"):
+        st.download_button("Clique aqui para baixar o relatório", data=df_banco.to_csv(index=False), file_name="relatorio_nanosignals.csv")
 
 with aba3:
+    st.subheader("Novo Registro de Lançamento")
     with st.form("form_novo"):
-        valor = st.number_input("Valor (R$)", min_value=0.0)
+        data = st.date_input("Data do lançamento")
+        valor = st.number_input("Valor (R$)", min_value=0.0, format="%.2f")
         desc = st.text_input("Descrição")
-        resp = st.selectbox("Responsável", df['Responsavel'].unique() if not df.empty else ["Manual"])
-        tipo = st.radio("Natureza:", ["Entrada", "Saída"])
-        if st.form_submit_button("Confirmar"):
-            sheet.append_row([valor, "14/07/2026", desc, resp, tipo])
-            st.success("Lançamento concluído!")
+        resp = st.text_input("Responsável")
+        tipo = st.selectbox("Tipo de movimento", ["Entrada", "Saída"])
+        
+        if st.form_submit_button("Salvar no Sistema"):
+            c.execute("INSERT INTO financeiro VALUES (?,?,?,?,?)", (str(data), valor, desc, resp, tipo))
+            conn.commit()
+            st.success("Lançamento salvo com sucesso!")
             st.rerun()
