@@ -27,12 +27,12 @@ def init_db():
 
 init_db()
 
-# --- SIDEBAR DE NAVEGAÇÃO ---
+# --- SIDEBAR ---
 with st.sidebar:
     st.title("🚀 NanoSignals PRO")
     menu = st.radio("MENU", ["Dashboard Executivo", "Lançamentos e Edição", "Importar Dados"])
 
-# --- LÓGICA DE IMPORTAÇÃO ---
+# --- LÓGICA DE IMPORTAÇÃO (MAIS ROBUSTA) ---
 if menu == "Importar Dados":
     st.title("📥 Importação de Histórico")
     uploaded_files = st.file_uploader("Suba seus arquivos CSV aqui", accept_multiple_files=True)
@@ -40,21 +40,22 @@ if menu == "Importar Dados":
         conn = get_db_connection()
         for file in uploaded_files:
             try:
-                # Tenta ler com diferentes codificações para evitar erro de caracteres
-                try:
-                    df = pd.read_csv(file, encoding='utf-8')
-                except UnicodeDecodeError:
-                    df = pd.read_csv(file, encoding='latin-1')
+                # O parâmetro 'on_bad_lines="skip"' ignora linhas que estão fora do padrão
+                # O parâmetro 'sep' tenta detectar automaticamente ou assume vírgula
+                df = pd.read_csv(file, encoding='latin-1', on_bad_lines='skip', sep=None, engine='python')
                 
-                # Normalização: força o mapeamento para as colunas do sistema
+                # Seleciona apenas as 5 colunas que importam, independentemente do nome original
                 df = df.iloc[:, :5]
                 df.columns = ['data', 'valor', 'descricao', 'responsavel', 'tipo']
-                df = df.dropna(how='all') # Remove linhas vazias
                 
+                # Remove linhas onde todos os campos são nulos
+                df = df.dropna(how='all')
+                
+                # Garante que dados vazios não quebrem o banco
                 df.to_sql('financeiro', conn, if_exists='append', index=False)
-                st.success(f"Arquivo {file.name} importado com sucesso!")
+                st.success(f"Arquivo {file.name} processado com sucesso!")
             except Exception as e:
-                st.error(f"Erro ao processar {file.name}: {e}")
+                st.error(f"Erro no arquivo {file.name}: {e}")
         conn.close()
 
 # --- DASHBOARD EXECUTIVO ---
@@ -79,30 +80,26 @@ elif menu == "Dashboard Executivo":
 
 # --- LANÇAMENTOS E EDIÇÃO ---
 elif menu == "Lançamentos e Edição":
-    st.title("📝 Lançamentos e Edição")
+    st.title("📝 Lançamentos")
     conn = get_db_connection()
     df = pd.read_sql_query("SELECT * FROM financeiro", conn)
     
-    # Tabela Profissional Editável
     gb = GridOptionsBuilder.from_dataframe(df)
     gb.configure_default_column(editable=True, filter=True)
-    grid_response = AgGrid(df, gridOptions=gb.build(), update_mode=GridUpdateMode.VALUE_CHANGED, height=400, use_container_width=True)
+    AgGrid(df, gridOptions=gb.build(), update_mode=GridUpdateMode.VALUE_CHANGED, height=400, use_container_width=True)
     
-    st.divider()
     with st.form("add_form"):
         st.subheader("Novo Lançamento Manual")
         c1, c2, c3 = st.columns(3)
         data = c1.date_input("Data")
-        valor = c2.number_input("Valor (R$)", min_value=0.0, format="%.2f")
+        valor = c2.number_input("Valor", min_value=0.0, format="%.2f")
         desc = c3.text_input("Descrição")
         resp = c1.text_input("Responsável")
         tipo = c2.selectbox("Natureza", ["Entrada", "Saída"])
-        
         if st.form_submit_button("Confirmar Lançamento"):
             c = conn.cursor()
             c.execute("INSERT INTO financeiro (data, valor, descricao, responsavel, tipo) VALUES (?,?,?,?,?)", 
                       (str(data), valor, desc, resp, tipo))
             conn.commit()
-            st.success("Lançamento efetuado com sucesso!")
             st.rerun()
     conn.close()
