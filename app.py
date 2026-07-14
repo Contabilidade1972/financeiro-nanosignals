@@ -8,8 +8,8 @@ from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 st.set_page_config(page_title="Gestão Financeira NanoSignals", layout="wide")
 st.title("🚀 Sistema de Gestão Financeira - NanoSignals")
 
+# Conexão segura lendo as variáveis do Secrets (formatadas em TOML)
 def conectar_gsheets():
-    # Carrega as credenciais diretamente do Secrets
     creds_dict = {
         "type": st.secrets["type"],
         "project_id": st.secrets["project_id"],
@@ -26,18 +26,18 @@ def conectar_gsheets():
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     return gspread.authorize(creds)
 
+# Carregamento e processamento dos dados
 try:
     client = conectar_gsheets()
-    # Certifique-se que a planilha existe no drive e foi compartilhada com o client_email
     sheet = client.open("Base_Financeira_Oficial").sheet1
     df = pd.DataFrame(sheet.get_all_records())
     df['Valor'] = pd.to_numeric(df['Valor'], errors='coerce').fillna(0)
 except Exception as e:
-    st.error(f"Erro ao conectar: {e}")
+    st.error(f"Erro ao conectar com a planilha: {e}")
     st.stop()
 
-# Layout do sistema
-aba1, aba2, aba3 = st.tabs(["Dashboard", "Relatório", "Novo Lançamento"])
+# Interface em abas
+aba1, aba2, aba3 = st.tabs(["Dashboard", "Relatório Detalhado", "Novo Lançamento"])
 
 with aba1:
     col1, col2 = st.columns(2)
@@ -45,17 +45,21 @@ with aba1:
     col2.plotly_chart(px.pie(df, values='Valor', names='Responsavel', title="Distribuição Financeira"), use_container_width=True)
 
 with aba2:
+    st.subheader("Relatório Financeiro")
     gb = GridOptionsBuilder.from_dataframe(df)
-    gb.configure_default_column(editable=True)
+    gb.configure_default_column(editable=True, filter=True)
+    gb.configure_column("Valor", valueFormatter="value.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})")
     AgGrid(df, gridOptions=gb.build(), update_mode=GridUpdateMode.VALUE_CHANGED, use_container_width=True)
 
 with aba3:
+    st.subheader("Registrar Movimentação")
     with st.form("form_novo"):
-        valor = st.number_input("Valor (R$)", min_value=0.0)
+        valor = st.number_input("Valor (R$)", min_value=0.0, format="%.2f")
         desc = st.text_input("Descrição")
-        resp = st.selectbox("Responsável", df['Responsavel'].unique())
+        resp = st.selectbox("Responsável", df['Responsavel'].unique().tolist())
         tipo = st.radio("Natureza:", ["Entrada", "Saída"])
-        if st.form_submit_button("Registrar Lançamento"):
+        if st.form_submit_button("Confirmar Lançamento"):
+            # Salva na planilha (Data fixa como exemplo, você pode ajustar com st.date_input)
             sheet.append_row([valor, "14/07/2026", desc, resp, tipo])
-            st.success("Lançamento concluído!")
+            st.success("Lançamento efetuado com sucesso!")
             st.rerun()
