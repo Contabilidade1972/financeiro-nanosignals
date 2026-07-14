@@ -5,7 +5,7 @@ st.set_page_config(page_title="Dashboard NanoSignals", layout="wide")
 st.title("📊 Dashboard Financeiro - NanoSignals")
 
 # Link da sua planilha (Google Sheets publicada como CSV)
-url = "https://docs.google.com/spreadsheets/d/1vQMxxSLeI8P3OcA_RKINdgEsggB-yhQI5J7s_mcCd9o/export?format=csv"
+url = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRB94ZeKrMAp-UYBpTDrHRVKNfgF_3W9UCwVIQuntrQP7lq2Hd0DHWoWg0Qe8uWjQMoUFMDJ7oQgYrC/pub?output=csv"
 
 @st.cache_data
 def load_data():
