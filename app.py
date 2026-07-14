@@ -3,63 +3,60 @@ import pandas as pd
 import sqlite3
 import plotly.express as px
 
-# Configuração da Página
-st.set_page_config(page_title="NanoSignals ERP", layout="wide")
+st.set_page_config(page_title="NanoSignals PRO", layout="wide")
 
-# --- BANCO DE DADOS ROBUSTO ---
+# CSS para forçar um layout limpo e profissional
+st.markdown("""
+    <style>
+    .stMetric {background-color: #f0f2f6; padding: 15px; border-radius: 10px;}
+    .css-1544g2n {padding: 1rem;}
+    </style>
+""", unsafe_allow_html=True)
+
+# Banco de Dados
 def get_db():
-    conn = sqlite3.connect('nanosignals_erp.db', check_same_thread=False)
-    # Estrutura com tabelas normalizadas
-    conn.execute('''CREATE TABLE IF NOT EXISTS contas (id INTEGER PRIMARY KEY, nome TEXT, tipo TEXT, saldo REAL)''')
-    conn.execute('''CREATE TABLE IF NOT EXISTS financeiro (
-                    id INTEGER PRIMARY KEY, data TEXT, valor REAL, descricao TEXT, 
-                    conta_origem TEXT, categoria TEXT, tipo TEXT, status TEXT)''')
-    return conn
+    return sqlite3.connect('nanosignals_pro.db', check_same_thread=False)
 
-# --- SIDEBAR DE NAVEGAÇÃO (Menus pedidos) ---
-with st.sidebar:
-    st.image("https://img.icons8.com/color/96/000000/finance.png", width=60)
-    st.title("NanoSignals ERP")
-    menu = st.radio("MENU PRINCIPAL", ["Dashboard", "Financeiro / Movimentação", "Cadastros", "Relatórios", "Configurações"])
+# Menu Superior limpo
+menu = st.radio("Selecione o Módulo:", ["Dashboard Executivo", "Movimentação Financeira"], horizontal=True)
 
-# --- DASHBOARD (Visualização) ---
-if menu == "Dashboard":
-    st.header("📊 Painel de Controle")
-    st.info("Saldo Consolidado: R$ 0,00 | Próximos Vencimentos: 0")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("Fluxo de Caixa")
-        st.bar_chart(pd.DataFrame({'Entradas': [100, 200], 'Saídas': [50, 150]}))
-    with col2:
-        st.subheader("Curva ABC de Despesas")
-        st.pie_chart(pd.DataFrame({'Valores': [500, 300, 200]}, index=['Fornecedor A', 'Fornecedor B', 'Impostos']))
+if menu == "Dashboard Executivo":
+    st.title("📊 Painel NanoSignals")
+    conn = get_db()
+    df = pd.read_sql_query("SELECT * FROM financeiro", conn)
+    conn.close()
 
-# --- FINANCEIRO (Movimentação) ---
-elif menu == "Financeiro / Movimentação":
-    st.header("💳 Movimentação Financeira")
-    tab1, tab2, tab3 = st.tabs(["Contas a Pagar", "Contas a Receber", "Transferências"])
-    
-    with tab1:
-        st.subheader("Lançar Conta a Pagar")
-        with st.form("pagar"):
-            col1, col2 = st.columns(2)
-            col1.date_input("Data Vencimento")
-            col2.number_input("Valor R$", format="%.2f")
-            st.text_input("Fornecedor")
-            st.selectbox("Forma de Pagamento", ["Pix", "Cartão de Crédito", "Boleto", "TED"])
-            if st.form_submit_button("Registrar Conta"):
-                st.success("Conta registrada com sucesso!")
+    if not df.empty:
+        # Limpeza forçada dos dados para evitar o erro visual
+        df['valor'] = pd.to_numeric(df['valor'], errors='coerce').fillna(0)
+        
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Entradas", f"R$ {df[df['tipo']=='Entrada']['valor'].sum():,.2f}")
+        c2.metric("Saídas", f"R$ {df[df['tipo']=='Saída']['valor'].sum():,.2f}")
+        c3.metric("Saldo", f"R$ {df[df['tipo']=='Entrada']['valor'].sum() - df[df['tipo']=='Saída']['valor'].sum():,.2f}")
+        
+        st.divider()
+        st.plotly_chart(px.bar(df, x='descricao', y='valor', color='tipo', title="Distribuição de Fluxo"), use_container_width=True)
+    else:
+        st.warning("Nenhum dado registrado. Vá para 'Movimentação Financeira'.")
 
-# --- CADASTROS ---
-elif menu == "Cadastros":
-    st.header("📝 Cadastros Base")
-    cat = st.selectbox("O que deseja cadastrar?", ["Contas Bancárias", "Fornecedores", "Centro de Custo"])
-    st.text_input(f"Nome do {cat}")
-    st.button("Salvar Cadastro")
-
-# --- RELATÓRIOS ---
-elif menu == "Relatórios":
-    st.header("📑 Central de Relatórios")
-    st.multiselect("Filtrar por Período", ["Janeiro", "Fevereiro", "Março"])
-    st.download_button("Exportar PDF", "dados", "relatorio.pdf")
+else:
+    st.title("📝 Gestão de Movimentação")
+    with st.form("lancamento"):
+        c1, c2 = st.columns(2)
+        data = c1.date_input("Data")
+        valor = c2.number_input("Valor R$", format="%.2f")
+        desc = c1.text_input("Descrição")
+        tipo = c2.selectbox("Tipo", ["Entrada", "Saída"])
+        if st.form_submit_button("Confirmar Lançamento"):
+            conn = get_db()
+            conn.execute("INSERT INTO financeiro (data, valor, descricao, tipo) VALUES (?,?,?,?)", 
+                         (str(data), valor, desc, tipo))
+            conn.commit()
+            conn.close()
+            st.rerun()
+            
+    # Listagem organizada
+    conn = get_db()
+    st.dataframe(pd.read_sql_query("SELECT * FROM financeiro", conn), use_container_width=True)
+    conn.close()
