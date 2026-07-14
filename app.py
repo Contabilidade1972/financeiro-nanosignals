@@ -8,7 +8,7 @@ from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 st.set_page_config(page_title="Gestão Financeira NanoSignals", layout="wide")
 st.title("🚀 Sistema de Gestão Financeira - NanoSignals")
 
-# Conexão segura lendo as variáveis do Secrets (formatadas em TOML)
+# Função de Conexão com Google Sheets (leitura direta do Secrets)
 def conectar_gsheets():
     creds_dict = {
         "type": st.secrets["type"],
@@ -29,7 +29,8 @@ def conectar_gsheets():
 # Carregamento e processamento dos dados
 try:
     client = conectar_gsheets()
-    sheet = client.open("Base_Financeira_Oficial").sheet1
+    # Conexão utilizando o ID específico da sua planilha
+    sheet = client.open_by_key("1B_6Gd5l0lv3MeXt4WYBfZ9wa9AGxrf5SIJW54697G6M").sheet1
     df = pd.DataFrame(sheet.get_all_records())
     df['Valor'] = pd.to_numeric(df['Valor'], errors='coerce').fillna(0)
 except Exception as e:
@@ -56,10 +57,13 @@ with aba3:
     with st.form("form_novo"):
         valor = st.number_input("Valor (R$)", min_value=0.0, format="%.2f")
         desc = st.text_input("Descrição")
-        resp = st.selectbox("Responsável", df['Responsavel'].unique().tolist())
+        # Pega a lista de responsáveis da planilha atual
+        resp_options = df['Responsavel'].unique().tolist() if not df.empty else ["Manual"]
+        resp = st.selectbox("Responsável", resp_options)
         tipo = st.radio("Natureza:", ["Entrada", "Saída"])
+        
         if st.form_submit_button("Confirmar Lançamento"):
-            # Salva na planilha (Data fixa como exemplo, você pode ajustar com st.date_input)
+            # Adiciona na linha nova da planilha
             sheet.append_row([valor, "14/07/2026", desc, resp, tipo])
             st.success("Lançamento efetuado com sucesso!")
             st.rerun()
