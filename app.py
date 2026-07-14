@@ -1,32 +1,34 @@
 import streamlit as st
 import pandas as pd
 import sqlite3
+import plotly.express as px
 
+# Configuração da Página
 st.set_page_config(page_title="NanoSignals PRO", layout="wide")
 
-# Conexão direta e segura
-def get_conn():
-    return sqlite3.connect('nanosignals_definitivo.db', check_same_thread=False)
+# Conexão com o Banco de Dados
+def get_db():
+    return sqlite3.connect('nanosignals_final.db', check_same_thread=False)
 
-# Inicialização mínima
-conn = get_conn()
+# Inicialização
+conn = get_db()
 conn.execute('CREATE TABLE IF NOT EXISTS financeiro (id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT, valor REAL, descricao TEXT, responsavel TEXT, tipo TEXT)')
 conn.commit()
 conn.close()
 
 st.title("🚀 NanoSignals PRO - Sistema Estável")
 
-aba1, aba2 = st.tabs(["📊 Dashboard", "📝 Lançamentos"])
+aba1, aba2 = st.tabs(["📊 Dashboard Executivo", "📝 Gestão de Lançamentos"])
 
 with aba1:
-    conn = get_conn()
+    conn = get_db()
     df = pd.read_sql_query("SELECT * FROM financeiro", conn)
     conn.close()
     
     if df.empty:
-        st.warning("O sistema está vazio. Adicione lançamentos na aba 'Lançamentos'.")
+        st.warning("O sistema está vazio. Adicione registros na aba 'Gestão de Lançamentos'.")
     else:
-        # Força limpeza básica para evitar erros
+        # Limpeza robusta para exibição
         df['valor'] = pd.to_numeric(df['valor'], errors='coerce').fillna(0)
         
         ent = df[df['tipo'] == 'Entrada']['valor'].sum()
@@ -37,22 +39,29 @@ with aba1:
         c2.metric("Saídas", f"R$ {sai:,.2f}")
         c3.metric("Saldo", f"R$ {ent - sai:,.2f}")
         
-        st.write("Registros encontrados:", len(df))
-        st.dataframe(df)
+        st.plotly_chart(px.bar(df, x='responsavel', y='valor', color='tipo'), use_container_width=True)
 
 with aba2:
+    st.subheader("Registrar Lançamento")
     with st.form("lancamento_form"):
-        data = st.date_input("Data")
-        valor = st.number_input("Valor", format="%.2f")
-        desc = st.text_input("Descrição")
-        resp = st.text_input("Responsável")
-        tipo = st.selectbox("Tipo", ["Entrada", "Saída"])
+        col1, col2 = st.columns(2)
+        data = col1.date_input("Data")
+        valor = col1.number_input("Valor", format="%.2f")
+        desc = col2.text_input("Descrição")
+        resp = col2.text_input("Responsável")
+        tipo = st.selectbox("Natureza", ["Entrada", "Saída"])
         
-        if st.form_submit_button("Salvar Registro"):
-            conn = get_conn()
+        if st.form_submit_button("Salvar no Banco"):
+            conn = get_db()
             conn.execute("INSERT INTO financeiro (data, valor, descricao, responsavel, tipo) VALUES (?,?,?,?,?)", 
                          (str(data), valor, desc, resp, tipo))
             conn.commit()
             conn.close()
             st.success("Salvo com sucesso!")
             st.rerun()
+
+    st.subheader("Registros Atuais")
+    conn = get_db()
+    df_lista = pd.read_sql_query("SELECT * FROM financeiro", conn)
+    st.dataframe(df_lista, use_container_width=True)
+    conn.close()
