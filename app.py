@@ -2,55 +2,68 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 import plotly.express as px
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
+from datetime import datetime
 
-# Configuração da página
+# Configuração de Estilo
 st.set_page_config(page_title="NanoSignals PRO", layout="wide")
-st.title("🚀 NanoSignals - Sistema de Gestão Financeira")
+st.markdown("""
+    <style>
+    .main {background-color: #f5f7f9;}
+    .stButton>button {width: 100%; border-radius: 5px; font-weight: bold;}
+    </style>
+    """, unsafe_allow_html=True)
 
-# Conexão com o banco de dados interno
-conn = sqlite3.connect('nanosignals_db.db', check_same_thread=False)
+# Banco de Dados
+conn = sqlite3.connect('nanosignals_pro.db', check_same_thread=False)
 c = conn.cursor()
 c.execute('''CREATE TABLE IF NOT EXISTS financeiro 
              (id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT, valor REAL, descricao TEXT, responsavel TEXT, tipo TEXT)''')
 conn.commit()
 
-# --- INTERFACE ---
-aba1, aba2, aba3 = st.tabs(["Dashboard", "Gestão de Dados", "Novo Lançamento"])
+# Sidebar de Navegação
+st.sidebar.title("🚀 NanoSignals PRO")
+menu = st.sidebar.radio("Navegação", ["Dashboard Executivo", "Gestão de Lançamentos", "Importar Histórico", "Relatórios"])
 
-# Carrega dataframe do banco
-df_banco = pd.read_sql_query("SELECT * FROM financeiro", conn)
+# Lógica de Importação (Botão para carregar suas planilhas)
+if menu == "Importar Histórico":
+    st.subheader("📥 Carga de Histórico (Planilhas Antigas)")
+    uploaded_files = st.file_uploader("Arraste seus arquivos CSV aqui", accept_multiple_files=True)
+    if uploaded_files:
+        for file in uploaded_files:
+            df = pd.read_csv(file)
+            df.to_sql('financeiro', conn, if_exists='append', index=False)
+            st.success(f"Arquivo {file.name} importado!")
 
-with aba1:
-    st.subheader("Visão Geral Financeira")
-    col1, col2 = st.columns(2)
-    if not df_banco.empty:
-        col1.plotly_chart(px.bar(df_banco, x='responsavel', y='valor', color='tipo', title="Gastos por Sócio"), use_container_width=True)
-        col2.plotly_chart(px.pie(df_banco, values='valor', names='responsavel', title="Distribuição"), use_container_width=True)
+# Dashboard
+if menu == "Dashboard Executivo":
+    st.title("📊 Dashboard Executivo")
+    df = pd.read_sql_query("SELECT * FROM financeiro", conn)
+    if not df.empty:
+        c1, c2 = st.columns(2)
+        c1.plotly_chart(px.bar(df, x='responsavel', y='valor', color='tipo', title="Performance por Sócio"), use_container_width=True)
+        c2.plotly_chart(px.pie(df, values='valor', names='tipo', title="Composição Financeira"), use_container_width=True)
     else:
-        st.write("Nenhum dado cadastrado.")
+        st.info("Nenhum dado encontrado. Acesse a aba 'Importar Histórico'.")
 
-with aba2:
-    st.subheader("Relatórios Detalhados")
-    gb = GridOptionsBuilder.from_dataframe(df_banco)
-    gb.configure_default_column(editable=True, filter=True)
-    grid_response = AgGrid(df_banco, gridOptions=gb.build(), update_mode=GridUpdateMode.VALUE_CHANGED, use_container_width=True)
-    
-    if st.button("Download CSV"):
-        st.download_button("Baixar Relatório", data=df_banco.to_csv(index=False), file_name="relatorio_nanosignals.csv")
-
-with aba3:
-    st.subheader("Novo Registro de Lançamento")
-    with st.form("form_novo"):
-        data = st.date_input("Data do lançamento")
-        valor = st.number_input("Valor (R$)", min_value=0.0, format="%.2f")
-        desc = st.text_input("Descrição")
-        resp = st.text_input("Responsável")
-        tipo = st.selectbox("Tipo de movimento", ["Entrada", "Saída"])
-        
-        if st.form_submit_button("Salvar no Sistema"):
+# Gestão de Dados
+elif menu == "Gestão de Lançamentos":
+    st.title("📝 Registro de Operações")
+    with st.form("lancamento_form"):
+        col1, col2 = st.columns(2)
+        data = col1.date_input("Data")
+        valor = col1.number_input("Valor", format="%.2f")
+        desc = col2.text_input("Descrição")
+        resp = col2.text_input("Responsável")
+        tipo = st.selectbox("Natureza", ["Entrada", "Saída"])
+        if st.form_submit_button("Confirmar Lançamento"):
             c.execute("INSERT INTO financeiro (data, valor, descricao, responsavel, tipo) VALUES (?,?,?,?,?)", 
                       (str(data), valor, desc, resp, tipo))
             conn.commit()
-            st.success("Lançamento salvo com sucesso!")
-            st.rerun()
+            st.success("Lançamento efetuado com sucesso!")
+
+# Relatórios
+elif menu == "Relatórios":
+    st.title("📑 Central de Relatórios")
+    df = pd.read_sql_query("SELECT * FROM financeiro", conn)
+    st.dataframe(df, use_container_width=True)
+    st.download_button("Exportar para Excel (.csv)", df.to_csv(index=False), "relatorio.csv")
