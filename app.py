@@ -1,62 +1,75 @@
 import streamlit as st
-import pandas as pd
 import sqlite3
+import pandas as pd
 import plotly.express as px
 
-st.set_page_config(page_title="NanoSignals PRO", layout="wide")
+# Configuração Global
+st.set_page_config(page_title="NanoSignals ERP", layout="wide")
 
-# CSS para forçar um layout limpo e profissional
-st.markdown("""
-    <style>
-    .stMetric {background-color: #f0f2f6; padding: 15px; border-radius: 10px;}
-    .css-1544g2n {padding: 1rem;}
-    </style>
-""", unsafe_allow_html=True)
+# Inicialização do Banco de Dados Interno
+def init_db():
+    conn = sqlite3.connect('nanosignals_erp.db', check_same_thread=False)
+    conn.execute('''CREATE TABLE IF NOT EXISTS financeiro (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                    data DATE, 
+                    descricao TEXT, 
+                    valor REAL, 
+                    tipo TEXT, 
+                    status TEXT)''')
+    conn.commit()
+    conn.close()
 
-# Banco de Dados
-def get_db():
-    return sqlite3.connect('nanosignals_pro.db', check_same_thread=False)
+init_db()
 
-# Menu Superior limpo
-menu = st.radio("Selecione o Módulo:", ["Dashboard Executivo", "Movimentação Financeira"], horizontal=True)
+# Navegação e Estilo
+st.title("🚀 NanoSignals ERP")
+menu = st.radio("Módulo:", ["Dashboard", "Contas a Pagar/Receber", "Cadastros"], horizontal=True)
 
-if menu == "Dashboard Executivo":
-    st.title("📊 Painel NanoSignals")
-    conn = get_db()
+# --- MÓDULO DASHBOARD ---
+if menu == "Dashboard":
+    st.header("📊 Visão Geral")
+    conn = sqlite3.connect('nanosignals_erp.db')
     df = pd.read_sql_query("SELECT * FROM financeiro", conn)
     conn.close()
-
+    
     if not df.empty:
-        # Limpeza forçada dos dados para evitar o erro visual
-        df['valor'] = pd.to_numeric(df['valor'], errors='coerce').fillna(0)
-        
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Entradas", f"R$ {df[df['tipo']=='Entrada']['valor'].sum():,.2f}")
-        c2.metric("Saídas", f"R$ {df[df['tipo']=='Saída']['valor'].sum():,.2f}")
-        c3.metric("Saldo", f"R$ {df[df['tipo']=='Entrada']['valor'].sum() - df[df['tipo']=='Saída']['valor'].sum():,.2f}")
-        
-        st.divider()
-        st.plotly_chart(px.bar(df, x='descricao', y='valor', color='tipo', title="Distribuição de Fluxo"), use_container_width=True)
+        col1, col2, col3 = st.columns(3)
+        total_rec = df[df['tipo']=='Receber']['valor'].sum()
+        total_pag = df[df['tipo']=='Pagar']['valor'].sum()
+        col1.metric("Total a Receber", f"R$ {total_rec:,.2f}")
+        col2.metric("Total a Pagar", f"R$ {total_pag:,.2f}")
+        col3.metric("Saldo Líquido", f"R$ {total_rec - total_pag:,.2f}")
+        st.plotly_chart(px.bar(df, x='data', y='valor', color='tipo', barmode='group'), use_container_width=True)
     else:
-        st.warning("Nenhum dado registrado. Vá para 'Movimentação Financeira'.")
+        st.info("Nenhum movimento registrado. Use o módulo 'Contas a Pagar/Receber'.")
 
-else:
-    st.title("📝 Gestão de Movimentação")
+# --- MÓDULO FINANCEIRO ---
+elif menu == "Contas a Pagar/Receber":
+    st.header("💳 Movimentação")
     with st.form("lancamento"):
         c1, c2 = st.columns(2)
-        data = c1.date_input("Data")
-        valor = c2.number_input("Valor R$", format="%.2f")
-        desc = c1.text_input("Descrição")
-        tipo = c2.selectbox("Tipo", ["Entrada", "Saída"])
-        if st.form_submit_button("Confirmar Lançamento"):
-            conn = get_db()
-            conn.execute("INSERT INTO financeiro (data, valor, descricao, tipo) VALUES (?,?,?,?)", 
-                         (str(data), valor, desc, tipo))
+        data = c1.date_input("Data de Vencimento")
+        desc = c2.text_input("Descrição")
+        valor = c1.number_input("Valor R$", format="%.2f")
+        tipo = c2.selectbox("Natureza", ["Pagar", "Receber"])
+        status = st.selectbox("Status", ["Pendente", "Pago/Recebido"])
+        
+        if st.form_submit_button("Salvar Movimentação"):
+            conn = sqlite3.connect('nanosignals_erp.db')
+            conn.execute("INSERT INTO financeiro (data, descricao, valor, tipo, status) VALUES (?,?,?,?,?)", 
+                         (data, desc, valor, tipo, status))
             conn.commit()
             conn.close()
+            st.success("Lançamento efetuado!")
             st.rerun()
             
-    # Listagem organizada
-    conn = get_db()
+    st.divider()
+    st.subheader("Lista de Movimentações")
+    conn = sqlite3.connect('nanosignals_erp.db')
     st.dataframe(pd.read_sql_query("SELECT * FROM financeiro", conn), use_container_width=True)
     conn.close()
+
+# --- MÓDULO CADASTROS ---
+elif menu == "Cadastros":
+    st.header("🏢 Cadastros")
+    st.warning("Módulo em desenvolvimento. Aqui você cadastrará Bancos, Fornecedores e Planos de Conta.")
