@@ -6,7 +6,7 @@ from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
 st.set_page_config(page_title="NanoSignals PRO", layout="wide")
 
-# --- BANCO DE DADOS (O Coração do Sistema) ---
+# --- BANCO DE DADOS ---
 def get_db():
     conn = sqlite3.connect('nanosignals_pro.db', check_same_thread=False)
     return conn
@@ -21,8 +21,8 @@ def init_db():
 
 init_db()
 
-# --- NAVEGAÇÃO E LAYOUT ---
-st.title("🚀 NanoSignals PRO - Sistema Integrado")
+# --- NAVEGAÇÃO ---
+st.title("🚀 NanoSignals PRO")
 aba1, aba2, aba3 = st.tabs(["📊 Dashboard Executivo", "📝 Gestão e Lançamentos", "📥 Importar Histórico"])
 
 # ABA 1: Dashboard
@@ -32,41 +32,33 @@ with aba1:
     conn.close()
     
     if not df.empty:
+        # Conversão forçada: garante que 'valor' seja número e 'tipo' seja texto
+        df['valor'] = pd.to_numeric(df['valor'], errors='coerce').fillna(0)
+        df['tipo'] = df['tipo'].astype(str)
+        
         c1, c2, c3 = st.columns(3)
         c1.metric("Entradas", f"R$ {df[df['tipo']=='Entrada']['valor'].sum():,.2f}")
         c2.metric("Saídas", f"R$ {df[df['tipo']=='Saída']['valor'].sum():,.2f}")
         c3.metric("Saldo", f"R$ {df[df['tipo']=='Entrada']['valor'].sum() - df[df['tipo']=='Saída']['valor'].sum():,.2f}")
-        st.plotly_chart(px.bar(df, x='responsavel', y='valor', color='tipo', title="Performance por Sócio"), use_container_width=True)
+        
+        st.write("---")
+        c1, c2 = st.columns(2)
+        c1.plotly_chart(px.bar(df, x='responsavel', y='valor', color='tipo'), use_container_width=True)
+        c2.plotly_chart(px.pie(df, values='valor', names='tipo'), use_container_width=True)
     else:
-        st.info("O sistema está vazio. Use a aba 'Importar Histórico' para carregar seus arquivos.")
+        st.info("O sistema está vazio. Importe seus arquivos CSV.")
 
-# ABA 2: Lançamentos
+# ABA 2: Gestão
 with aba2:
-    st.header("Lançamentos Detalhados")
     conn = get_db()
     df = pd.read_sql_query("SELECT * FROM financeiro", conn)
-    
     gb = GridOptionsBuilder.from_dataframe(df)
-    gb.configure_default_column(editable=True, filter=True)
-    AgGrid(df, gridOptions=gb.build(), height=300, use_container_width=True)
-    
-    with st.form("add_form"):
-        c1, c2, c3 = st.columns(3)
-        data = c1.date_input("Data")
-        valor = c2.number_input("Valor", format="%.2f")
-        desc = c3.text_input("Descrição")
-        resp = c1.text_input("Responsável")
-        tipo = c2.selectbox("Natureza", ["Entrada", "Saída"])
-        if st.form_submit_button("Salvar Registro"):
-            c = conn.cursor()
-            c.execute("INSERT INTO financeiro (data, valor, descricao, responsavel, tipo) VALUES (?,?,?,?,?)", (str(data), valor, desc, resp, tipo))
-            conn.commit()
-            st.rerun()
+    gb.configure_default_column(editable=True)
+    AgGrid(df, gridOptions=gb.build(), update_mode=GridUpdateMode.VALUE_CHANGED, use_container_width=True)
     conn.close()
 
 # ABA 3: Importação
 with aba3:
-    st.header("Importação de Planilhas Antigas")
     uploaded_files = st.file_uploader("Suba seus CSVs", accept_multiple_files=True)
     if uploaded_files:
         conn = get_db()
@@ -75,8 +67,13 @@ with aba3:
                 df = pd.read_csv(file, encoding='latin-1', on_bad_lines='skip', sep=None, engine='python')
                 df = df.iloc[:, :5]
                 df.columns = ['data', 'valor', 'descricao', 'responsavel', 'tipo']
+                
+                # LIMPEZA CRÍTICA: Remove símbolos de moeda e converte para número na hora da carga
+                df['valor'] = df['valor'].replace(r'[R$\s]', '', regex=True).replace(',', '.', regex=True)
+                df['valor'] = pd.to_numeric(df['valor'], errors='coerce').fillna(0)
+                
                 df.to_sql('financeiro', conn, if_exists='append', index=False)
-                st.success(f"Arquivo {file.name} carregado!")
+                st.success(f"Sucesso: {file.name}")
             except Exception as e:
                 st.error(f"Erro no arquivo {file.name}: {e}")
         conn.close()
